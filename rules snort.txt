@@ -1,0 +1,30 @@
+Rules Snort :
+
+# DDoS SYN Flood
+alert tcp any any -> $HOME_NET any (msg:"SYN Flood Attack Detected"; flags:S; threshold:type both, track by_dst, count 50, seconds 10; sid:1000011; rev:1;)
+
+# DDoS HTTP Flood
+alert tcp any any -> $HOME_NET 80 (msg:"DDoS HTTP Flood Detected"; flags:S; content:"GET"; http_method; threshold:type both, track by_src, count 100, seconds 10; sid:1000012; rev:1;) 
+
+# DDoS ICMP Flood
+alert icmp any any -> $HOME_NET any (msg:"ICMP flood detected"; detection_filter:track by_src, count 50, seconds 10; sid:1000013; rev:1;)
+
+# SSH Brute Force Attack
+alert tcp any any -> $HOME_NET 22 (msg:"SSH Brute Force Attack Detected"; flags:S; threshold:type both, track by_src, count 5, seconds 10; sid:1000014; rev:1;)
+
+
+Deskripsi :
+
+Aturan-aturan Snort berikut ini dirancang untuk mendeteksi berbagai jenis serangan DDoS (Distributed Denial of Service) serta serangan brute force SSH yang berpotensi mengancam keamanan jaringan Anda. Aturan ini memanfaatkan mekanisme threshold untuk mendeteksi pola lalu lintas yang mencurigakan berdasarkan volume tertentu dalam jangka waktu yang singkat, yang merupakan ciri khas dari serangan DDoS atau brute force. Berikut adalah penjelasan masing-masing aturan:
+
+SYN Flood :
+Aturan ini mendeteksi serangan SYN Flood, yang merupakan jenis serangan DDoS di mana pelaku mengirimkan sejumlah besar paket SYN untuk membanjiri dan merusak kemampuan server untuk menangani permintaan koneksi yang sah. Aturan ini memonitor paket TCP dengan flag SYN yang dikirim ke jaringan target ($HOME_NET) dan mengidentifikasi adanya lebih dari 50 koneksi SYN dalam waktu 10 detik untuk host tujuan yang sama.
+
+HTTP Flood :
+Aturan ini mengidentifikasi serangan HTTP Flood, di mana pelaku mencoba membanjiri server web dengan permintaan HTTP berulang, sering kali dengan metode GET. Aturan ini mendeteksi lebih dari 100 permintaan GET dari satu sumber dalam waktu 10 detik ke port HTTP (port 80). Serangan ini dapat menyebabkan server menjadi lambat atau bahkan tidak dapat diakses karena kelebihan beban.
+
+ICMP Flood :
+Aturan ini digunakan untuk mendeteksi serangan ICMP Flood, yang merupakan jenis DDoS di mana serangan mengirimkan sejumlah besar paket ICMP (seperti ping) ke jaringan target, dengan tujuan untuk membanjiri dan menyebabkan gangguan. Jika ada lebih dari 50 paket ICMP dari satu sumber dalam waktu 10 detik, aturan ini akan memicu peringatan, yang menandakan potensi serangan.
+
+SSH Brute Force :
+Aturan ini dirancang untuk mendeteksi SSH Brute Force Attack, di mana penyerang mencoba menebak kata sandi untuk mendapatkan akses tidak sah ke server melalui protokol SSH. Aturan ini mendeteksi lebih dari 5 percobaan koneksi dengan flag SYN ke port SSH (port 22) dari satu sumber dalam waktu 10 detik. Serangan brute force dapat mengakibatkan kebocoran data atau akses tidak sah ke sistem jika tidak dikenali dan ditangani dengan cepat.

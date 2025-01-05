@@ -1,0 +1,156 @@
+import time
+import requests
+import re
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# Konfigurasi Floodlight Controller
+FLOODLIGHT_API_URL = "URL_Floodlightnya"
+MONITOR_LOG_PATH = "LOG_Filenya"  # Lokasi log yang akan dipantau
+
+# Fungsi untuk mendeteksi ICMP Flood
+def detect_icmp_flood(log_line):
+    if "ICMP" in log_line:
+        return True
+    return False
+
+# Fungsi untuk mempush flow rule ke Floodlight Controller
+def push_flow_to_floodlight():
+    flow_rule = {
+        "switch": "ID_Switch",
+        "name": "redirect_icmp_to_honeypot",
+        "priority": "60000",
+        "eth_type": "0x0800",
+        "ip_proto": "1",  # ICMP protocol
+        "actions": "output=4"  # Output ke port 4 untuk honeypot (port sesuai dari switch, kalau di OpenvSwitch -1)
+    }
+    
+    try:
+        response = requests.post(FLOODLIGHT_API_URL, json=flow_rule)
+        if response.status_code == 200:
+            print("Flow rule ICMP Flood berhasil didorong ke Floodlight!")
+        else:
+            print(f"Error saat mengirim flow rule: {response.status_code}")
+    except Exception as e:
+        print(f"Error saat mengirim request ke Floodlight: {e}")
+
+# Kelas untuk memantau file log
+class LogFileHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        if event.src_path == MONITOR_LOG_PATH:
+            with open(MONITOR_LOG_PATH, "r") as log_file:
+                lines = log_file.readlines()
+                # Ambil entri terakhir
+                last_line = lines[-1].strip()  # Menghapus spasi atau newline di akhir baris
+                
+                # Deteksi serangan ICMP Flood
+                if detect_icmp_flood(last_line):
+                    print("Serangan ICMP Flood terdeteksi!")
+                    push_flow_to_floodlight()  # Push flow ke Floodlight
+
+# Setup pemantauan log
+def start_monitoring():
+    event_handler = LogFileHandler()
+    observer = Observer()
+    observer.schedule(event_handler, MONITOR_LOG_PATH, recursive=False)
+    observer.start()
+    print(f"Memulai pemantauan log pada {MONITOR_LOG_PATH}...")
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+# Jalankan pemantauan
+if __name__ == "__main__":
+    start_monitoring()
+
+
+
+
+
+
+
+
+
+
+
+
+DESKRIPSI
+
+Script ini dibuat untuk mendeteksi dan menangani serangan ICMP Flood, yang merupakan salah satu jenis serangan Distributed Denial of Service (DDoS). Dalam serangan ICMP Flood, penyerang mengirimkan banyak paket ICMP (seperti ping) ke target untuk membanjiri jaringan dan mengganggu layanan yang sah.
+
+Jika script ini mendeteksi adanya serangan ICMP Flood melalui file log sistem (misalnya, /var/log/auth.log), maka secara otomatis script ini akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi sebagai serangan ke port honeypot atau perangkat lain guna mitigasi lebih lanjut.
+
+Cara Kerja Script
+Memantau Log File:
+Script ini memantau file log /var/log/auth.log untuk mendeteksi indikasi serangan ICMP Flood. Setiap kali file log diubah, script akan membaca log baru dan memeriksa apakah ada entri yang menunjukkan adanya serangan ICMP Flood.
+
+Deteksi Serangan ICMP Flood:
+Script ini menggunakan metode pencocokan sederhana dengan memeriksa apakah terdapat kata kunci "ICMP" dalam baris log terbaru. Anda dapat menyesuaikan pencocokan ini sesuai dengan pola log di sistem Anda.
+
+Mengirim Flow Rule ke Floodlight:
+Jika terdeteksi adanya serangan ICMP Flood, script ini akan mengirimkan flow rule ke Floodlight Controller. Flow rule yang dikirimkan akan mengalihkan lalu lintas ICMP yang terdeteksi ke port honeypot atau perangkat mitigasi lainnya untuk meminimalkan dampak serangan.
+
+Flow rule yang dikirimkan memiliki konfigurasi sebagai berikut:
+
+Switch ID: ID switch yang relevan (disesuaikan dengan perangkat di jaringan Anda).
+Nama Flow: Nama flow rule, misalnya redirect_icmp_to_honeypot.
+IP Protocol: Menggunakan ICMP (protocol 1) untuk mendeteksi paket ICMP.
+Aksi: Mengalihkan lalu lintas ke port honeypot (port 4 dalam contoh ini).
+Pemantauan Log secara Real-time:
+Script ini menggunakan library Watchdog untuk memantau perubahan pada file log secara langsung. Setiap kali file log dimodifikasi, script akan segera memeriksa baris baru dan mendeteksi apakah ada serangan ICMP Flood.
+
+Fitur Utama
+Deteksi Serangan ICMP Flood:
+Script ini secara otomatis mendeteksi serangan ICMP Flood berdasarkan entri log yang relevan, seperti paket ICMP.
+
+Integrasi dengan Floodlight:
+Setelah serangan terdeteksi, script akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi ke honeypot atau perangkat mitigasi lainnya.
+
+Pemantauan Log secara Real-time:
+Dengan menggunakan Watchdog, script ini memantau perubahan pada file log secara langsung, sehingga deteksi serangan dan respons terhadap serangan bisa dilakukan dengan cepat.
+
+Prasyarat
+Floodlight Controller:
+Pastikan Floodlight Controller sudah terpasang dan dapat menerima flow rules melalui API. Anda perlu mengganti FLOODLIGHT_API_URL dengan URL API yang sesuai.
+
+Log Sistem:
+Script ini mengandalkan file log untuk mendeteksi serangan. Di sistem Linux, file log yang digunakan adalah /var/log/auth.log. Pastikan Anda memiliki izin untuk membaca file ini.
+
+Library Python:
+Script ini membutuhkan dua library Python untuk berfungsi:
+
+requests: Untuk mengirimkan permintaan HTTP ke API Floodlight.
+watchdog: Untuk memantau perubahan pada file log.
+
+Anda bisa menginstal dependensi yang diperlukan dengan menjalankan perintah berikut:
+pip install requests watchdog
+
+Konfigurasi
+FLOODLIGHT_API_URL:
+Gantilah URL ini dengan alamat API Floodlight Controller yang sesuai dengan jaringan Anda.
+
+HONEY_POT_IP:
+Tentukan alamat IP honeypot yang ingin Anda gunakan untuk mengalihkan lalu lintas ICMP yang terdeteksi.
+
+MONITOR_LOG_PATH:
+Pastikan path ini menunjuk ke file log yang relevan dengan sistem Anda, seperti /var/log/auth.log.
+
+Cara Menggunakan Script
+Pastikan Floodlight Controller sudah terpasang dan dapat menerima flow rules melalui API.
+
+Pastikan Anda memiliki izin untuk membaca file log yang akan dipantau (misalnya, /var/log/auth.log).
+
+Jalankan script di sistem yang memiliki akses ke log dan Floodlight Controller:
+python detect_icmp_flood.py
+
+Script ini akan mulai memantau file log. Jika terdeteksi serangan ICMP Flood, flow rule akan otomatis dikirimkan ke Floodlight untuk mengalihkan lalu lintas yang terdeteksi ke honeypot.
+
+Catatan
+Anda bisa menyesuaikan pola deteksi ICMP (misalnya, dengan mencari kata "ICMP") jika format log Anda berbeda.
+Gantilah ID switch dalam flow rule dengan ID switch yang benar sesuai dengan perangkat jaringan Anda.
+Anda juga bisa menyesuaikan IP honeypot atau port lainnya untuk mitigasi yang lebih sesuai dengan kebijakan mitigasi serangan Anda.
+Dengan script ini, Anda dapat dengan cepat mendeteksi dan merespons serangan ICMP Flood di jaringan Anda, membantu menjaga ketersediaan dan integritas sistem Anda. Script ini sangat berguna untuk mitigasi serangan DDoS berbasis ICMP.

@@ -1,0 +1,148 @@
+import time
+import requests
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# Konfigurasi Floodlight Controller
+FLOODLIGHT_API_URL = "URL_Floodlightnya"
+MONITOR_LOG_PATH = "LOG_Filenya"  # Lokasi log yang akan dipantau
+
+# Fungsi untuk mendeteksi HTTP Flood berdasarkan log
+def detect_http_flood(log_line):
+    if "DDoS HTTP Flood Detected" in log_line:
+        return True
+    return False
+
+# Fungsi untuk mempush flow rule ke Floodlight (HTTP Flood)
+def push_http_flood_flow_to_floodlight():
+    flow_rule = {
+        "switch": "ID_Switch",  # Ganti dengan ID switch yang sesuai
+        "name": "redirect_http_to_honeypot",
+        "priority": "60000",
+        "eth_type": "0x0800",  # IPv4
+        "ip_proto": "6",  # TCP
+        "tcp_dst": "80",  # Port HTTP
+        "actions": "output=4"  # Mengalihkan ke port honeypot (port sesuai dari switch, kalau di OpenvSwitch -1)
+    }
+
+    try:
+        response = requests.post(FLOODLIGHT_API_URL, json=flow_rule)
+        if response.status_code == 200:
+            print("Flow rule HTTP Flood berhasil dipush ke Floodlight.")
+        else:
+            print(f"Gagal push flow rule: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error dalam mengirimkan permintaan: {e}")
+
+# Monitor log file untuk HTTP Flood
+class LogHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        if event.src_path == MONITOR_LOG_PATH:
+            with open(event.src_path, "r") as log_file:
+                log_lines = log_file.readlines()
+                for line in log_lines:
+                    if detect_http_flood(line):
+                        print("HTTP Flood terdeteksi! Mengirimkan flow rule...")
+                        push_http_flood_flow_to_floodlight()
+
+# Setup observer untuk memantau perubahan pada log
+if __name__ == "__main__":
+    event_handler = LogHandler()
+    observer = Observer()
+    observer.schedule(event_handler, path="/var/log", recursive=False)
+    observer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DESKRIPSI
+
+Script ini dirancang untuk mendeteksi dan merespons serangan HTTP Flood, yang merupakan salah satu jenis serangan Distributed Denial of Service (DDoS). Serangan HTTP Flood bertujuan untuk membanjiri server dengan banyak permintaan HTTP, sehingga server tidak dapat melayani permintaan yang sah.
+
+Jika serangan HTTP Flood terdeteksi melalui log sistem (misalnya, /var/log/auth.log), script ini akan otomatis mengirimkan aturan aliran (flow rule) ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi sebagai bagian dari serangan HTTP Flood ke port honeypot atau perangkat lainnya guna mitigasi.
+
+Cara Kerja Script
+Memantau Log File:
+Script ini memantau file log /var/log/auth.log untuk mendeteksi adanya indikasi serangan HTTP Flood. Setiap kali file log diubah, script akan membaca log baru dan memeriksa apakah ada baris yang mengandung pola yang menunjukkan serangan HTTP Flood.
+
+Deteksi Serangan HTTP Flood:
+Script ini mencari pola tertentu dalam log, seperti "DDoS HTTP Flood Detected", yang menandakan adanya serangan HTTP Flood. Anda bisa menyesuaikan pola ini agar sesuai dengan format log yang digunakan di sistem Anda.
+
+Mengirim Flow Rule ke Floodlight:
+Setelah mendeteksi serangan HTTP Flood, script akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi ke port honeypot atau perangkat lainnya. Flow rule yang dikirimkan mencakup beberapa hal berikut:
+
+Switch ID: ID switch yang sesuai di jaringan Anda.
+Nama Flow: Nama aturan aliran, misalnya redirect_http_to_honeypot.
+Port Tujuan: Menggunakan port 80 (HTTP).
+Aksi: Mengalihkan lalu lintas ke port honeypot untuk mitigasi.
+Pemantauan Log secara Real-time:
+Script ini menggunakan library Watchdog untuk memantau file log secara real-time. Setiap kali log dimodifikasi, script akan segera memeriksa baris-baris baru dalam log untuk mendeteksi serangan. Jika terdeteksi, flow rule akan dikirimkan ke Floodlight untuk mitigasi.
+
+Fitur Utama
+Deteksi Serangan HTTP Flood:
+Script ini secara otomatis mendeteksi serangan HTTP Flood berdasarkan entri log yang relevan.
+
+Integrasi dengan Floodlight:
+Setelah deteksi, script mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas HTTP yang terdeteksi ke honeypot atau perangkat mitigasi lainnya.
+
+Pemantauan Log secara Real-time:
+Dengan menggunakan Watchdog, script ini memantau perubahan pada file log secara langsung untuk mendeteksi serangan lebih cepat.
+
+Prasyarat
+Floodlight Controller:
+Pastikan Floodlight Controller sudah terpasang dan dapat menerima flow rules melalui API. Anda perlu mengganti FLOODLIGHT_API_URL dengan URL API yang sesuai.
+
+Log Sistem:
+Script ini mengandalkan file log sistem untuk mendeteksi serangan. File log yang digunakan dalam script ini adalah /var/log/auth.log, tetapi Anda bisa menyesuaikan file log sesuai dengan konfigurasi di sistem Anda.
+
+Library Python:
+Script ini membutuhkan dua library Python untuk berfungsi:
+
+requests: Untuk mengirimkan permintaan HTTP ke API Floodlight.
+watchdog: Untuk memantau perubahan pada file log.
+
+Anda dapat menginstal dependensi yang diperlukan dengan menjalankan perintah berikut:
+pip install requests watchdog
+
+Konfigurasi
+FLOODLIGHT_API_URL:
+Gantilah URL ini dengan alamat API Floodlight Controller yang sesuai dengan jaringan Anda.
+
+MONITOR_LOG_PATH:
+Pastikan path ini menunjuk ke file log yang relevan dengan sistem Anda (misalnya, /var/log/auth.log).
+
+Cara Menggunakan Script
+Pastikan Floodlight Controller sudah berjalan dan siap menerima flow rule melalui API.
+
+Pastikan Anda memiliki izin untuk membaca file log yang akan dipantau (misalnya, /var/log/auth.log).
+
+Jalankan script di sistem yang memiliki akses ke log dan Floodlight Controller:
+python detect_http_flood.py
+
+Script ini akan mulai memantau log untuk mendeteksi serangan HTTP Flood. Jika terdeteksi, flow rule akan otomatis dikirimkan ke Floodlight untuk mengalihkan lalu lintas yang terdeteksi ke honeypot.
+
+Catatan
+Anda bisa menyesuaikan pola deteksi (misalnya, pola "DDoS HTTP Flood Detected") sesuai dengan format log di sistem Anda.
+Gantilah ID switch dalam flow rule dengan ID switch yang benar sesuai dengan jaringan Anda.
+Anda juga bisa mengubah aksi dalam flow rule untuk mengalihkan lalu lintas ke firewall atau perangkat mitigasi lainnya sesuai dengan kebijakan mitigasi serangan Anda.
+Dengan script ini, Anda dapat secara otomatis mendeteksi dan merespons serangan HTTP Flood di jaringan Anda. Script ini sangat berguna untuk meningkatkan ketahanan sistem Anda terhadap serangan DDoS berbasis HTTP.

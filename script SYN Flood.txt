@@ -1,0 +1,147 @@
+import time
+import requests
+import re
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# Konfigurasi Floodlight Controller
+FLOODLIGHT_API_URL = "URL_Floodlightnya"
+MONITOR_LOG_PATH = "File_Lognya"
+
+# Fungsi untuk mendeteksi SYN Flood berdasarkan log
+def detect_syn_flood(log_line):
+    # Menyesuaikan deteksi dengan format log yang mungkin ada di Log.File
+    # Misalnya, jika ada baris yang mengindikasikan SYN Flood, pastikan patternnya ada di sini
+    syn_flood_pattern = r"SYN flood detected|SYN Flood Attack Detected"  # Pastikan pattern sesuai dengan log yang ada
+
+    if re.search(syn_flood_pattern, log_line, re.IGNORECASE):
+        return True
+    return False
+
+# Fungsi untuk mempush flow rule ke Floodlight (SYN Flood)
+def push_syn_flood_flow_to_floodlight():
+    flow_rule = {
+        "switch": "ID_Switch",  # Ganti dengan ID switch yang sesuai
+        "name": "redirect_syn_to_honeypot",
+        "priority": "60000",
+        "eth_type": "0x0800",  # IPv4
+        "ip_proto": "6",  # TCP
+        "tcp_flags": "0x02",  # Flag SYN
+        "actions": "output=4"  # Mengalihkan ke port honeypot (port sesuai dari switch, kalau di OpenvSwitch -1)
+    }
+
+    try:
+        response = requests.post(FLOODLIGHT_API_URL, json=flow_rule)
+        if response.status_code == 200:
+            print("Flow rule SYN Flood berhasil dipush ke Floodlight.")
+        else:
+            print(f"Gagal push flow rule: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error dalam mengirimkan permintaan: {e}")
+
+# Monitor log file untuk SYN Flood
+class LogHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        # Pastikan hanya memantau perubahan pada Log.File
+        if event.src_path == MONITOR_LOG_PATH:
+            print(f"Log file {event.src_path} telah dimodifikasi.")  # Debugging
+            with open(event.src_path, "r") as log_file:
+                # Pindahkan pointer ke akhir file untuk memulai pembacaan baru
+                log_file.seek(0, 2)
+                while True:
+                    line = log_file.readline()
+                    if not line:
+                        time.sleep(0.1)  # Tunggu sebentar sebelum mencoba membaca lagi
+                        continue
+                    print(f"Baris log yang dibaca: {line.strip()}")  # Debugging
+                    if detect_syn_flood(line):
+                        print("SYN Flood terdeteksi! Mengirimkan flow rule...")
+                        push_syn_flood_flow_to_floodlight()
+
+# Setup observer untuk memantau perubahan pada log
+if __name__ == "__main__":
+    event_handler = LogHandler()
+    observer = Observer()
+    observer.schedule(event_handler, path="/var/log", recursive=False)
+    observer.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+
+
+
+
+
+DESKRIPSI :
+
+Script ini dibuat untuk mendeteksi dan menangani serangan SYN Flood, yang merupakan jenis serangan DDoS (Distributed Denial of Service). Dalam serangan ini, penyerang mengirimkan banyak paket SYN ke server atau perangkat jaringan, membuatnya kesulitan mengelola koneksi yang sah. Ketika script ini mendeteksi adanya serangan SYN Flood lewat log sistem, script akan secara otomatis mengirimkan aturan aliran (flow rule) ke Floodlight Controller, untuk mengalihkan lalu lintas serangan ke honeypot atau port lain untuk mengurangi dampaknya.
+
+Cara Kerja Script
+Memantau Log File:
+Script ini memonitor file log /var/log/auth.log untuk melihat apakah ada tanda-tanda serangan SYN Flood. Setiap kali file log berubah, script akan memeriksa baris-baris baru dan mencari pola yang mencurigakan, menggunakan regular expression.
+
+Mendeteksi Serangan SYN Flood:
+Script mencari kata-kata tertentu seperti "SYN flood detected" atau "SYN Flood Attack Detected" dalam log. Anda bisa menyesuaikan pola ini agar sesuai dengan format log yang digunakan di sistem Anda, sehingga bisa mendeteksi serangan SYN Flood dengan lebih tepat.
+
+Mengirim Flow Rule ke Floodlight:
+Setelah mendeteksi serangan, script akan mengirimkan flow rule ke Floodlight Controller. Flow rule ini akan mengarahkan lalu lintas yang terdeteksi sebagai bagian dari serangan ke honeypot atau perangkat lain untuk mengurangi dampaknya. Beberapa hal yang ada dalam flow rule ini:
+
+Switch ID: ID switch yang sesuai di jaringan Anda.
+Nama Flow: Nama aturan aliran, misalnya redirect_syn_to_honeypot.
+TCP Flags: Menggunakan flag TCP SYN (0x02) untuk mendeteksi permintaan koneksi.
+Aksi: Mengalihkan lalu lintas ke port honeypot.
+Menggunakan Watchdog:
+Script menggunakan Watchdog, sebuah library Python yang memantau file log secara real-time. Setiap kali log berubah, script akan segera memeriksa baris baru, dan jika terdeteksi serangan, flow rule akan dikirimkan ke Floodlight untuk mengalihkan serangan.
+
+Fitur Utama
+Deteksi Serangan SYN Flood:
+Script mencari tanda-tanda serangan SYN Flood di log sistem dan meresponsnya.
+
+Integrasi dengan Floodlight:
+Setelah serangan terdeteksi, script akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas serangan.
+
+Pemantauan Log secara Real-time:
+Dengan menggunakan Watchdog, script ini memantau perubahan di log file secara langsung dan cepat.
+
+Prasyarat
+Floodlight Controller:
+Pastikan Floodlight Controller sudah berjalan di jaringan Anda dan siap menerima flow rules melalui API. Anda perlu mengganti URL API (FLOODLIGHT_API_URL) dengan URL yang sesuai.
+
+Log Sistem:
+Script ini memantau file log sistem untuk mencari tanda-tanda serangan. Di sistem Linux, biasanya file log terletak di /var/log/auth.log. Pastikan Anda punya izin untuk membaca file ini.
+
+Library Python:
+Script ini membutuhkan dua library Python:
+
+requests: Untuk mengirim permintaan HTTP ke API Floodlight.
+watchdog: Untuk memantau perubahan pada file log.
+
+Anda bisa menginstalnya dengan menjalankan perintah ini:
+pip install requests watchdog
+
+Konfigurasi
+FLOODLIGHT_API_URL:
+Gantilah URL ini dengan alamat API Floodlight Controller yang ada di jaringan Anda.
+
+MONITOR_LOG_PATH:
+Pastikan path ini menunjuk ke file log yang benar (misalnya, /var/log/auth.log).
+
+Cara Menggunakan Script
+Pastikan Floodlight Controller sudah terpasang dan bisa menerima flow rule melalui API.
+
+Pastikan Anda memiliki izin untuk membaca file log yang akan dipantau (misalnya, /var/log/auth.log).
+
+Jalankan script di sistem yang memiliki akses ke log dan Floodlight Controller:
+python detect_syn_flood.py
+
+Script akan mulai memantau file log. Jika ada serangan SYN Flood yang terdeteksi, script akan mengirimkan flow rule untuk mengalihkan lalu lintas serangan ke honeypot.
+
+Catatan
+Anda bisa menyesuaikan pola deteksi (syn_flood_pattern) jika log yang digunakan memiliki format yang berbeda.
+Gantilah ID switch dalam flow rule dengan ID switch yang benar sesuai dengan perangkat jaringan Anda.
+Anda juga bisa mengubah aksi dalam flow rule, seperti mengalihkan lalu lintas ke firewall atau perangkat mitigasi lainnya.

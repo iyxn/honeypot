@@ -1,0 +1,179 @@
+import time
+import requests
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# Konfigurasi Floodlight Controller
+FLOODLIGHT_API_URL = "URL_Floodlightnya"
+MONITOR_LOG_PATH = "Log_Filenya"  # Lokasi log yang akan dipantau
+
+# Fungsi untuk mendeteksi SSH Brute Force Attack
+def detect_ssh_brute_force(log_line):
+    if "SSH Brute Force Attack Detected" in log_line:
+        return True
+    return False
+
+# Fungsi untuk mempush dua flow rule ke Floodlight
+def push_ssh_flow_to_floodlight():
+    # Flow rule untuk IP Client (Izinkan akses SSH)
+    flow_rule_allow_ip = {
+        "switch": "ID_Swtich",  # Ganti dengan MAC address switch yang sesuai
+        "name": "allow_ssh_for_Client",
+        "priority": "60000",  # Prioritas lebih rendah daripada yang digunakan untuk serangan
+        "eth_type": "0x0800",  # Ethernet type untuk IPv4
+        "ip_proto": "6",  # Protokol TCP
+        "tcp_dst": "22",  # Port SSH (22)
+        "ipv4_src": "IP_Client",  # IP yang diizinkan
+        "actions": "output=5"  # Arahkan ke port server utama
+    }
+
+    # Flow rule untuk mengalihkan serangan SSH Brute Force ke honeypot
+    flow_rule_redirect_bruteforce = {
+        "switch": "ID_Switch",  # Ganti dengan MAC address switch yang sesuai
+        "name": "redirect_ssh_to_honeypot",
+        "priority": "60000",  # Prioritas lebih tinggi untuk mendeteksi serangan
+        "eth_type": "0x0800",  # Ethernet type untuk IPv4
+        "ip_proto": "6",  # Protokol TCP
+        "tcp_dst": "22",  # Port SSH (22)
+        "actions": "output=3"  # Arahkan ke port 3 (honeypot) (port sesuai dari switch, kalau di OpenvSwitch -1)
+    }
+
+    try:
+        # Kirim flow rule untuk mengizinkan IP Client mengakses SSH
+        response_allow_ip = requests.post(FLOODLIGHT_API_URL, json=flow_rule_allow_ip)
+        if response_allow_ip.status_code == 200:
+            print(f"Flow rule untuk IP Client berhasil didorong ke Floodlight!")
+        else:
+            print(f"Error saat mengirim flow rule untuk IP Client: {response_allow_ip.status_code}")
+
+        # Kirim flow rule untuk mengarahkan trafik brute force ke honeypot
+        response_redirect = requests.post(FLOODLIGHT_API_URL, json=flow_rule_redirect_bruteforce)
+        if response_redirect.status_code == 200:
+            print("Flow rule SSH Brute Force berhasil didorong ke Floodlight!")
+        else:
+            print(f"Error saat mengirim flow rule untuk serangan SSH: {response_redirect.status_code}")
+
+    except Exception as e:
+        print(f"Error saat mengirim request ke Floodlight: {e}")
+
+# Kelas untuk memantau file log
+class LogFileHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        if event.src_path == MONITOR_LOG_PATH:
+            with open(MONITOR_LOG_PATH, "r") as log_file:
+                lines = log_file.readlines()
+                last_line = lines[-1].strip()
+                
+                if detect_ssh_brute_force(last_line):
+                    print("Serangan SSH Brute Force terdeteksi!")
+                    push_ssh_flow_to_floodlight()
+
+# Setup pemantauan log
+def start_monitoring():
+    event_handler = LogFileHandler()
+    observer = Observer()
+    observer.schedule(event_handler, MONITOR_LOG_PATH, recursive=False)
+    observer.start()
+    print(f"Memulai pemantauan log pada {MONITOR_LOG_PATH}...")
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+# Jalankan pemantauan
+if __name__ == "__main__":
+    start_monitoring()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DESKRIPSI
+
+Script ini dibuat untuk mendeteksi dan menangani serangan SSH Brute Force, yang merupakan jenis serangan keamanan yang berusaha untuk menebak kata sandi pengguna dengan cara mencoba banyak kombinasi username dan password. Dalam serangan SSH Brute Force, penyerang menggunakan metode otomatis untuk mencoba mengakses server melalui protokol SSH dengan sejumlah besar percobaan login.
+
+Jika script ini mendeteksi adanya indikasi serangan SSH Brute Force melalui file log sistem (misalnya, /var/log/auth.log), maka secara otomatis script ini akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi sebagai serangan ke port honeypot atau perangkat mitigasi lainnya guna menanggulangi dampak serangan.
+
+Cara Kerja Script
+Memantau Log File:
+Script ini memantau file log auth.log untuk mendeteksi indikasi serangan SSH Brute Force. Setiap kali file log diubah, script akan membaca log baru dan memeriksa apakah ada entri yang menunjukkan adanya upaya login yang berulang dalam waktu singkat, yang menjadi ciri khas dari serangan SSH Brute Force.
+
+Deteksi Serangan SSH Brute Force:
+Script ini menggunakan pencocokan sederhana untuk mendeteksi serangan SSH Brute Force berdasarkan pola log yang menunjukkan aktivitas login gagal berulang kali. Ketika pola ini terdeteksi, script akan segera mengidentifikasi serangan dan merespons dengan mengirimkan flow rule untuk mitigasi.
+
+Mengirim Flow Rule ke Floodlight:
+Jika terdeteksi adanya serangan SSH Brute Force, script ini akan mengirimkan flow rule ke Floodlight Controller. Flow rule yang dikirimkan akan mengalihkan lalu lintas dari IP yang terindikasi melakukan serangan ke port honeypot atau perangkat mitigasi lainnya untuk mengurangi dampak serangan.
+
+Flow rule yang dikirimkan memiliki konfigurasi sebagai berikut:
+
+Switch ID: ID switch yang relevan (disesuaikan dengan perangkat di jaringan Anda).
+Nama Flow: Nama flow rule, misalnya redirect_ssh_to_honeypot.
+Protokol IP: Menggunakan TCP dengan port SSH (port 22).
+Aksi: Mengalihkan lalu lintas ke port honeypot (port 3 dalam contoh ini).
+Pemantauan Log secara Real-time:
+Script ini menggunakan library Watchdog untuk memantau perubahan pada file log secara langsung. Setiap kali file log dimodifikasi, script akan segera memeriksa baris baru dan mendeteksi apakah ada indikasi serangan SSH Brute Force.
+
+Fitur Utama
+Deteksi Serangan SSH Brute Force:
+Script ini secara otomatis mendeteksi serangan SSH Brute Force berdasarkan entri log yang relevan, seperti banyaknya upaya login yang gagal.
+
+Integrasi dengan Floodlight:
+Setelah serangan terdeteksi, script akan mengirimkan flow rule ke Floodlight Controller untuk mengalihkan lalu lintas yang terdeteksi ke honeypot atau perangkat mitigasi lainnya.
+
+Pemantauan Log secara Real-time:
+Dengan menggunakan Watchdog, script ini memantau perubahan pada file log secara langsung, sehingga deteksi serangan dan respons terhadap serangan bisa dilakukan dengan cepat.
+
+Prasyarat
+Floodlight Controller:
+Pastikan Floodlight Controller sudah terpasang dan dapat menerima flow rules melalui API. Anda perlu mengganti FLOODLIGHT_API_URL dengan URL API yang sesuai.
+
+Log Sistem:
+Script ini mengandalkan file log untuk mendeteksi serangan. Di sistem Linux, file log yang digunakan adalah /var/log/auth.log. Pastikan Anda memiliki izin untuk membaca file ini.
+
+Library Python:
+Script ini membutuhkan dua library Python untuk berfungsi:
+
+requests: Untuk mengirimkan permintaan HTTP ke API Floodlight.
+watchdog: Untuk memantau perubahan pada file log.
+
+Anda bisa menginstal dependensi yang diperlukan dengan menjalankan perintah berikut:
+pip install requests watchdog
+
+Konfigurasi
+FLOODLIGHT_API_URL:
+Gantilah URL ini dengan alamat API Floodlight Controller yang sesuai dengan jaringan Anda.
+
+MONITOR_LOG_PATH:
+Pastikan path ini menunjuk ke file log yang relevan dengan sistem Anda, seperti /var/log/auth.log.
+
+Cara Menggunakan Script
+Persiapkan Floodlight Controller:
+Pastikan Floodlight Controller sudah terpasang dan dapat menerima flow rules melalui API.
+
+Pastikan Izin Log:
+Pastikan Anda memiliki izin untuk membaca file log yang akan dipantau (misalnya, /var/log/auth.log).
+
+Jalankan Script:
+
+Setelah semuanya siap, jalankan script di sistem yang memiliki akses ke log dan Floodlight Controller:
+python detect_ssh_bruteforce.py
+
+Script ini akan mulai memantau file log. Jika terdeteksi serangan SSH Brute Force, flow rule akan otomatis dikirimkan ke Floodlight untuk mengalihkan lalu lintas yang terdeteksi ke honeypot.
+
+Catatan
+Anda bisa menyesuaikan pola deteksi serangan SSH Brute Force (misalnya, dengan mencari kata kunci atau pola login gagal) jika format log Anda berbeda.
+Gantilah ID switch dalam flow rule dengan ID switch yang benar sesuai dengan perangkat jaringan Anda.
+Anda juga bisa menyesuaikan IP honeypot atau port lainnya untuk mitigasi yang lebih sesuai dengan kebijakan mitigasi serangan Anda.
+Dengan script ini, Anda dapat dengan cepat mendeteksi dan merespons serangan SSH Brute Force di jaringan Anda, membantu menjaga ketersediaan dan integritas sistem Anda. Script ini sangat berguna untuk mitigasi serangan brute force pada layanan SSH.
